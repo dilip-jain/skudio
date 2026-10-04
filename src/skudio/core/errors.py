@@ -32,5 +32,13 @@ class IRError(SkudioError):
     """IR construction, load, or migration failed."""
 
 
+class CompilerError(SkudioError):
+    """The compiler could not produce an estimator"""
+
+
+class CodegenError(SkudioError):
+    """Python codegen failed."""
+
+
 class RegistryError(SkudioError):
     """Unknown or duplicate component registration."""

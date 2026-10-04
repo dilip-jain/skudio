@@ -9,6 +9,11 @@ from pydantic import BaseModel, ConfigDict, model_validator
 PortType = Literal[
     "dataframe",
     "ndarray",
+    "series",
+    "fitted_transformer",
+    "fitter_estimator",
+    "predictions",
+    "metrics",
 ]
 
 PORT_TYPES: tuple[PortType, ...] = get_args(PortType)

@@ -15,12 +15,18 @@ if TYPE_CHECKING:
 
 NodeKind = Literal[
     "dataset",
+    "split",
+    "transformer",
+    "estimator",
+    "column_transformer",
     "pipeline",
+    "feature_union",
+    "search",
 ]
 
 NODE_KINDS: tuple[NodeKind, ...] = get_args(NodeKind)
 _COMPOSITE_KINDS: frozenset[str] = frozenset(
-    {"pipeline",}
+    {"column_transformer", "pipeline", "feature_union", "search"}
 )
 
 
