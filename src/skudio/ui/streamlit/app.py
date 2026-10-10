@@ -2,20 +2,32 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 import os
+import tempfile
+from pathlib import Path
 from typing import Any
 
+import joblib
+import numpy as np
 import pandas as pd
 import streamlit as st
 
 import skudio
 from skudio.components.metadata import ComponentMetadata, ParamDescriptor
 from skudio.components.registry import default_registry
+from skudio.core.hashing import ir_hash
+from skudio.core.ir.graph import Graph
+from skudio.core.codegen import emit_module
 from skudio.data.reader import load_csv
+from skudio.execution.runner import run_training
+from skudio.execution.result import TrainingResult
 from skudio.server.token import verify_token
+from skudio.ui.streamlit.graph_builder import build_graph
 
 _TOKEN_ENV = "SKUDIO_TOKEN"
+_TRAINED_KEY = "_trained_run"
 
 
 def main() -> None:
@@ -45,12 +57,28 @@ def main() -> None:
         help="Auto-detected from the target column. Override if needed.",
     )
 
-    _split_columns(df, features)
+    numeric_cols, categorical_cols = _split_columns(df, features)
     st.divider()
 
-    _preprocessing_section()
+    numeric_steps, categorical_steps = _preprocessing_section()
     st.divider()
 
+    estimator_meta, params = _estimator_section(task)
+    if estimator_meta is None:
+        return
+
+    st.divider()
+    _train_and_report(
+        df=df,
+        target=target,
+        task=task,
+        numeric_cols=numeric_cols,
+        categorical_cols=categorical_cols,
+        estimator_meta=estimator_meta,
+        params=params,
+        numeric_steps=numeric_steps,
+        categorical_steps=categorical_steps,
+    )
 
 
 def _token_ok() -> bool:
@@ -256,6 +284,60 @@ def _param_form_prefixed(meta: ComponentMetadata, *, key_prefix: str) -> dict[st
     return out
 
 
+def _estimator_section(task: str) -> tuple[ComponentMetadata | None, dict[str, Any]]:
+    st.header("4. Estimator")
+    reg = default_registry()
+    ests: list[ComponentMetadata] = [
+        m for m in reg.list() if m.category == "estimator" and (m.task == task or m.task is None)
+    ]
+
+    if not ests:
+        st.error(f"No estimators registered for task {task!r}.")
+        return None, {}
+
+    labels = [m.display_name for m in ests]
+    preferred = ("sklearn.ensemble.RandomForestClassifier" if task == "classification" \
+            else "sklearn.ensemble.RandomForestRegressor")
+
+    idx = st.selectbox(
+        "Choose an estimator",
+        options=list(range(len(ests))),
+        format_func=lambda i: labels[i],
+        index=next((i for i, m in enumerate(ests) if m.qualname == preferred), 0),
+    )
+
+    meta = ests[idx]
+    if meta.description:
+        st.caption(meta.description)
+    if meta.doc_url:
+        st.markdown(f"[sklearn docs]({meta.doc_url})")
+
+    params = _param_form(meta)
+    return meta, params
+
+
+def _param_form(meta: ComponentMetadata) -> dict[str, Any]:
+    basic = [p for p in meta.params if p.tier == "basic"]
+    advanced = [p for p in meta.params if p.tier == "advanced"]
+    out: dict[str, Any] = {}
+    for p in basic:
+        _collect_param(meta.qualname, p, out)
+    if advanced:
+        with st.expander("Advanced parameters"):
+            for p in advanced:
+                _collect_param(meta.qualname, p, out)
+    return out
+
+
+def _collect_param(qualname: str, p: ParamDescriptor, out: dict[str, Any]) -> None:
+    # Skip params the user left at "use sklearn's default"
+    # Omitting the kwarg entirely is safer than sending None or a bogus placeholder.
+    val = _widget_for(qualname, p)
+    if val is None and p.default is None:
+        return
+    out[p.name] = val
+
+
 def _widget_for(key_prefix: str, p: ParamDescriptor) -> Any:
     key = f"{key_prefix}::{p.name}"
     label = p.name
@@ -321,6 +403,83 @@ def _number_input(label: str, p: ParamDescriptor, key: str) -> float | None:
         key=key,
     )
     return float(val)
+
+
+def _train_and_report(
+    *,
+    df: Any,
+    target: str,
+    task: str,
+    numeric_cols: list[str],
+    categorical_cols: list[str],
+    estimator_meta: ComponentMetadata,
+    params: dict[str, Any],
+    numeric_steps: list[tuple[str, dict[str, Any]]] | None = None,
+    categorical_steps: list[tuple[str, dict[str, Any]]] | None = None,
+) -> None:
+    st.header("5. Train")
+    graph = build_graph(
+        estimator_qualname=estimator_meta.qualname,
+        estimator_params=params,
+        numeric_columns=numeric_cols,
+        categorical_columns=categorical_cols,
+        numeric_steps=numeric_steps,
+        categorical_steps=categorical_steps,
+        name=f"pipeline_{estimator_meta.qualname.rsplit('.', 1)[-1]}",
+    )
+
+    # If the user hit "Load" in the run history, downstream must reflect the loaded run.
+    cached = st.session_state.get(_TRAINED_KEY)
+    if (
+        cached
+        and isinstance(cached.get("key"), tuple)
+        and cached["key"]
+        and cached["key"][0] == "_loaded_"
+        and cached.get("graph_json")
+    ):
+        graph = Graph.model_validate_json(cached["graph_json"])
+
+    result = _get_or_train(graph, df, target, task)
+    if result.status == "failed":
+        st.error(result.error or "Training failed")
+        return
+
+    st.success(f"Done in {result.duration_seconds:.2f}s")
+    _show_metrics(result, task)
+
+
+def _get_or_train(graph: Any, df: Any, target: str, task: str) -> Any:
+    csv_path = _spill_to_temp(df)
+    with st.status("Training...", expanded=False) as status:
+        result = run_training(
+            graph,
+            dataset_path=str(csv_path),
+            target=target,
+            task=task, # type: ignore[arg-type]
+        )
+
+        status.update(
+            label=f"Training {'complete' if result.status == 'success' else 'failed'}",
+            state="complete" if result.status == "success" else "error",
+        )
+    return result
+
+
+def _show_metrics(result: Any, task: str) -> None:
+    st.subheader("Metrics")
+    m = result.metrics
+
+    cols = st.columns(4)
+    if task == "classification":
+        cols[0].metric("accuracy", f"{m:.3f}" if m is not None else "-")
+    else:
+        cols[0].metric("R^2", f"{m:.3f}" if m is not None else "-")
+
+
+def _spill_to_temp(df: Any) -> Path:
+    tmp = Path(tempfile.gettempdir()) / "skudio_dataset.csv"
+    df.to_csv(tmp, index=False)
+    return tmp
 
 
 # streamlit run app.py
