@@ -19,3 +19,4 @@ class TrainingResult(BaseModel):
     ir_hash: str = ""
     duration_seconds: float = 0.0
     logs: list[str] = []
+    run_id: str | None = None
