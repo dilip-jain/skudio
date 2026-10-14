@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import contextlib
 import io
 import os
 import tempfile
 from pathlib import Path
 from typing import Any
 
-import joblib
-import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -23,10 +20,14 @@ from skudio.core.codegen import emit_module
 from skudio.data.reader import load_csv
 from skudio.execution.runner import run_training
 from skudio.execution.result import TrainingResult
+from skudio.experiments.project import Project
+from skudio.experiments.persist import list_runs, load_run
 from skudio.server.token import verify_token
 from skudio.ui.streamlit.graph_builder import build_graph
 
 _TOKEN_ENV = "SKUDIO_TOKEN"
+_PROJECT_ENV = "SKUDIO_PROJECT"
+_PROJECT_DEFAULT = Path.home() / ".skudio" / "projects" / "default"
 _TRAINED_KEY = "_trained_run"
 
 
@@ -39,6 +40,8 @@ def main() -> None:
 
     st.title(skudio.NAME)
     st.caption(skudio.TAGLINE)
+
+    _run_history_sidebar()
 
     df = _dataset_section()
     if df is None:
@@ -439,16 +442,55 @@ def _train_and_report(
     ):
         graph = Graph.model_validate_json(cached["graph_json"])
 
-    result = _get_or_train(graph, df, target, task)
+    project_dir = _project_dir()
+    result = _get_or_train(graph, df, target, task, project_dir)
+    if result is None:
+        _show_downloads(graph)
+        return
+
     if result.status == "failed":
         st.error(result.error or "Training failed")
         return
 
     st.success(f"Done in {result.duration_seconds:.2f}s")
+    if result.run_id:
+        st.caption(f"Saved as run `{result.run_id}` under `{project_dir}`")
+
     _show_metrics(result, task)
+    _show_downloads(graph, result, project_dir)
 
 
-def _get_or_train(graph: Any, df: Any, target: str, task: str) -> Any:
+def _get_or_train(graph: Any, df: Any, target: str, task: str, project_dir: Path) -> Any:
+    # Streamlit reruns the whole script on every widget interaction, thus cache run.
+    cache_key = (ir_hash(graph), target, task)
+    cached = st.session_state.get(_TRAINED_KEY)
+    if cached:
+        cached_key = cached["key"]
+
+        is_loaded = isinstance(cached_key, tuple) and cached_key and cached_key[0] == "__loaded__"
+        if is_loaded or cached_key == cache_key:
+            cols = st.columns([1, 1, 4])
+            if cols[0].button("Train again", key="train_again"):
+                st.session_state.pop(_TRAINED_KEY, None)
+                st.rerun()
+
+            if is_loaded:
+                if cols[1].button("Clear", key="clear_loaded"):
+                    st.session_state.pop(_TRAINED_KEY, None)
+                    st.rerun()
+                cols[2].caption(
+                    f"Showing loaded run '{cached_key[1]}'. Form inputs above may not match."
+                )
+            else:
+                cols[2].caption(
+                    "Showing the last successful run. Change any param above to invalidate."
+                )
+
+            return TrainingResult.model_validate_json(cached["result_json"])
+
+    if not st.button("Train", type="primary"):
+        return None
+
     csv_path = _spill_to_temp(df)
     with st.status("Training...", expanded=False) as status:
         result = run_training(
@@ -456,24 +498,128 @@ def _get_or_train(graph: Any, df: Any, target: str, task: str) -> Any:
             dataset_path=str(csv_path),
             target=target,
             task=task, # type: ignore[arg-type]
+            save_to_project_dir=str(project_dir),
         )
 
         status.update(
             label=f"Training {'complete' if result.status == 'success' else 'failed'}",
             state="complete" if result.status == "success" else "error",
         )
+
+    if result.status == "success":
+        st.session_state[_TRAINED_KEY] = {"key": cache_key, "result_json": result.model_dump_json()}
     return result
+
+
+def _run_history_sidebar() -> None:
+    project_dir = _project_dir()
+    with st.sidebar:
+        st.header("Runs")
+        st.caption(f"Project: `{project_dir}`")
+
+        try:
+            project = Project.open(project_dir)
+        except FileNotFoundError:
+            st.caption("No runs yet - train a pipeline to populate this list.")
+            return
+
+        run_ids = list_runs(project)
+        if not run_ids:
+            st.caption("No runs yet - train a pipeline to populate this list.")
+            return
+
+        for rid in reversed(run_ids):
+            try:
+                graph, result = load_run(project, rid)
+            except Exception:  # pylint: disable=broad-except
+                continue
+
+            metric = _headline_metric(result)
+            estimator = _estimator_short_name(graph)
+            with st.container(border=True):
+                st.markdown(f"**{estimator}** \n{metric} \n`{rid}`")
+                if st.button("Load", key=f"load_{rid}"):
+                    st.session_state[_TRAINED_KEY] = {
+                        "key": ("__loaded__", rid),
+                        "result_json": result.model_dump_json(),
+                        "graph_json": graph.model_dump_json(),
+                    }
+                    st.rerun()
+
+
+def _headline_metric(result: Any) -> str:
+    m = result.metrics
+    if m is not None:
+        return f"accuracy = {m:.3f}"
+    if result.status == "failed":
+        return "failed"
+    return ""
+
+
+def _estimator_short_name(graph: Any) -> str:
+    for node in graph.nodes:
+        if node.kind == "estimator" and node.component is not None:
+            return node.component.qualname.rsplit(".", 1)[-1]
+    return "pipeline"
+
+
+def _project_dir() -> Path:
+    if "_project_dir" not in st.session_state:
+        st.session_state["_project_dir"] = os.environ.get(_PROJECT_ENV) or str(_PROJECT_DEFAULT)
+
+    path = Path(st.session_state["_project_dir"]).expanduser()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _show_metrics(result: Any, task: str) -> None:
     st.subheader("Metrics")
     m = result.metrics
 
-    cols = st.columns(4)
+    cols = st.columns(1)
     if task == "classification":
         cols[0].metric("accuracy", f"{m:.3f}" if m is not None else "-")
     else:
         cols[0].metric("R^2", f"{m:.3f}" if m is not None else "-")
+
+
+def _show_downloads(graph: Any, result: Any | None = None, project_dir: Path | None = None) -> None:
+    st.subheader("Show Python & downloads")
+    try:
+        code = emit_module(graph)
+    except Exception as exc:  # pylint: disable=broad-except
+        st.error(f"codegen failed: {exc}")
+        return
+
+    cols = st.columns(2)
+    cols[0].download_button(
+        "Download build_pipeline.py",
+        data=code,
+        file_name="build_pipeline.py",
+        mime="text/x-python",
+        width="stretch",
+    )
+
+    joblib_path = _joblib_path(result, project_dir)
+    if joblib_path is not None:
+        cols[1].download_button(
+            "Download fitted model (.joblib)",
+            data=joblib_path.read_bytes(),
+            file_name="pipeline.joblib",
+            mime="application/octet-stream",
+            width="stretch",
+        )
+    else:
+        cols[1].caption("Fitted model appears here after training.")
+
+    st.code(code, language="python")
+
+
+def _joblib_path(result: Any | None, project_dir: Path | None) -> Path | None:
+    if result is None or project_dir is None or not getattr(result, "run_id", None):
+        return None
+    candidate = project_dir / "experiments" / result.run_id / "pipeline.joblib"
+    return candidate if candidate.exists() else None
 
 
 def _spill_to_temp(df: Any) -> Path:

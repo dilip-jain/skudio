@@ -18,7 +18,8 @@ def run_training(
     target: str,
     task: Task = "classification",
     random_state: int = 0,
-    timeout_seconds: float | None = None
+    timeout_seconds: float | None = None,
+    save_to_project_dir: str | None = None,
 ) -> TrainingResult:
     """Run training in a spawned child process; return its TrainingResult."""
     ctx = mp.get_context("spawn")
@@ -30,7 +31,7 @@ def run_training(
     payload = canonical_json(graph)
     child = ctx.Process(
         target=_child_main,
-        args=(queue, payload, dataset_path, target, task, random_state),
+        args=(queue, payload, dataset_path, target, task, random_state, save_to_project_dir),
         daemon=False,
     )
 
@@ -62,7 +63,8 @@ def _child_main(
     dataset_path: str,
     target: str,
     task: Task,
-    random_state: int
+    random_state: int,
+    save_to_project_dir: str | None,
 ) -> None:
     # Deferred: train pulls in sklearn; keep it out of the parent process import path.
     # pylint: disable=import-outside-toplevel
@@ -75,7 +77,8 @@ def _child_main(
             dataset_path=dataset_path,
             target=target,
             task=task,
-            random_state=random_state
+            random_state=random_state,
+            save_to_project_dir=save_to_project_dir,
         )
 
     except Exception as exc:  # pylint: disable=broad-except
