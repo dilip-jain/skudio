@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import tempfile
@@ -18,6 +19,7 @@ from skudio.core.hashing import ir_hash
 from skudio.core.ir.graph import Graph
 from skudio.core.codegen import emit_module
 from skudio.data.reader import load_csv
+from skudio.execution.predict import PredictionError, batch_predict
 from skudio.execution.runner import run_training
 from skudio.execution.result import TrainingResult
 from skudio.experiments.project import Project
@@ -458,6 +460,7 @@ def _train_and_report(
 
     _show_metrics(result, task)
     _show_downloads(graph, result, project_dir)
+    _predict_section(result, project_dir, df, target)
 
 
 def _get_or_train(graph: Any, df: Any, target: str, task: str, project_dir: Path) -> Any:
@@ -620,6 +623,139 @@ def _joblib_path(result: Any | None, project_dir: Path | None) -> Path | None:
         return None
     candidate = project_dir / "experiments" / result.run_id / "pipeline.joblib"
     return candidate if candidate.exists() else None
+
+
+def _predict_section(result: Any, project_dir: Path, training_df: Any, target: str) -> None:
+    if not getattr(result, "run_id", None):
+        return
+
+    st.divider()
+    st.header("5. Predict on new data")
+
+    feature_df = (
+        training_df.drop(columns=[target]) if target in training_df.columns else training_df
+    )
+    batch_tab, row_tab = st.tabs(["Upload CSV", "Single row"])
+    with batch_tab:
+        _predict_batch(result, project_dir)
+    with row_tab:
+        _predict_single_row(result, project_dir, feature_df)
+
+
+def _predict_batch(result: Any, project_dir: Path) -> None:
+    upload = st.file_uploader("Upload a CSV with the same feature columns as your training data",
+        type=["csv"], key="predict_upload")
+    if upload is None:
+        st.caption("Upload a CSV to score with the fitted pipeline.")
+        return
+
+    df = pd.read_csv(io.BytesIO(upload.getvalue()))
+    st.write(f"Preview ({len(df)} rows)")
+    st.dataframe(df.head(10), width="stretch")
+
+    if not st.button("Run prediction", type="primary", key="predict_run"):
+        return
+
+    with st.spinner("Predicting..."):
+        try:
+            project = Project.open(project_dir)
+            predictions, warnings = batch_predict(project, result.run_id, df)
+        except PredictionError as exc:
+            st.error(str(exc))
+            return
+
+    for w in warnings:
+        st.warning(w)
+
+    st.success(f"Predicted {len(predictions)} rows")
+    st.dataframe(predictions.head(20), width="stretch")
+    st.download_button(
+        "Download predictions.csv",
+        data=predictions.to_csv(index=False).encode("utf-8"),
+        file_name="predictions.csv",
+        mime="text/csv",
+        width="stretch",
+    )
+
+
+def _predict_single_row(result: Any, project_dir: Path, feature_df: Any) -> None:
+    if len(feature_df.columns) == 0:
+        st.info("No feature columns to score.")
+        return
+
+    values = _single_row_widgets(feature_df)
+    if not st.button("Predict", type="primary", key="single_row_run"):
+        return
+
+    row_df = _single_row_frame(values, feature_df)
+    try:
+        project = Project.open(project_dir)
+        predictions, warnings = batch_predict(project, result.run_id, row_df)
+    except PredictionError as exc:
+        st.error(str(exc))
+        return
+
+    for w in warnings:
+        st.warning(w)
+
+    row = predictions.iloc[0]
+    st.metric("Prediction", str(row["prediction"]))
+    _show_single_row_probas(predictions)
+
+
+def _single_row_widgets(feature_df: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for col in feature_df.columns:
+        series = feature_df[col]
+        key = f"single_{col}"
+
+        if pd.api.types.is_bool_dtype(series):
+            values[col] = st.checkbox(
+                col, value=bool(_first_nonnull(series, default=False)), key=key)
+        elif pd.api.types.is_datetime64_any_dtype(series):
+            default = _first_nonnull(series, default=pd.Timestamp.now())
+            values[col] = st.date_input(col, value=default, key=key)
+        elif pd.api.types.is_numeric_dtype(series):
+            default = float(series.dropna().median()) if series.notna().any() else 0.0
+            values[col] = st.number_input(col, value=default, key=key, format="%.6g")
+        else:
+            uniques = sorted({str(u) for u in series.dropna().unique()})
+            if 0 < len(uniques) <= 50:
+                default = str(_first_nonnull(series, default=uniques[0]))
+                idx = uniques.index(default) if default in uniques else 0
+                values[col] = st.selectbox(col, options=uniques, index=idx, key=key)
+            else:
+                default = str(_first_nonnull(series, default=""))
+                values[col] = st.text_input(col, value=default, key=key)
+    return values
+
+
+def _first_nonnull(series: Any, *, default: Any) -> Any:
+    non_null = series.dropna()
+    return non_null.iloc[0] if not non_null.empty else default
+
+
+def _single_row_frame(values: dict[str, Any], feature_df: Any) -> Any:
+    row = pd.DataFrame([values])
+    for col in row.columns:
+        target_dtype = feature_df[col].dtype
+        with contextlib.suppress(TypeError, ValueError):
+            row[col] = row[col].astype(target_dtype)
+    return row
+
+
+def _show_single_row_probas(predictions: Any) -> None:
+    proba_cols = [c for c in predictions.columns if c.startswith("proba_")]
+    if not proba_cols:
+        return
+
+    row = predictions.iloc[0]
+    proba = pd.DataFrame({
+        "class": [c.removeprefix("proba_") for c in proba_cols],
+        "probability": [float(row[c]) for c in proba_cols],
+    }).sort_values("probability", ascending=False)
+
+    st.dataframe(proba, hide_index=True, width="stretch")
 
 
 def _spill_to_temp(df: Any) -> Path:
