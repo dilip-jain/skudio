@@ -461,6 +461,7 @@ def _train_and_report(
     _show_metrics(result, task)
     _show_downloads(graph, result, project_dir)
     _predict_section(result, project_dir, df, target)
+    _compare_runs_section(project_dir)
 
 
 def _get_or_train(graph: Any, df: Any, target: str, task: str, project_dir: Path) -> Any:
@@ -564,6 +565,37 @@ def _estimator_short_name(graph: Any) -> str:
         if node.kind == "estimator" and node.component is not None:
             return node.component.qualname.rsplit(".", 1)[-1]
     return "pipeline"
+
+
+def _compare_runs_section(project_dir: Path) -> None:
+    try:
+        project = Project.open(project_dir)
+    except FileNotFoundError:
+        return
+
+    run_ids = list_runs(project)
+    if len(run_ids) < 2:
+        return
+
+    st.divider()
+    st.header("6. Compare runs")
+
+    rows: list[dict[str, Any]] = []
+    for rid in run_ids:
+        try:
+            graph, result = load_run(project, rid)
+        except Exception:  # pylint: disable=broad-except
+            continue
+
+        m = result.metrics
+        rows.append({
+            "run_id": rid,
+            "estimator": _estimator_short_name(graph),
+            "accuracy": m,
+            "duration_s": round(result.duration_seconds, 2),
+        })
+
+    st.dataframe(rows, width="stretch", hide_index=True)
 
 
 def _project_dir() -> Path:
