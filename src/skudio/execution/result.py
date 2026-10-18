@@ -17,6 +17,7 @@ class TrainingResult(BaseModel):
     metrics: float | None = None
     error: str | None = None
     ir_hash: str = ""
+    dataset_hash: str = ""
     duration_seconds: float = 0.0
     logs: list[str] = []
     run_id: str | None = None

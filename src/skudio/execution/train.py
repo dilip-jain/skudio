@@ -13,7 +13,7 @@ from skudio.components import Task
 from skudio.core.compiler import compile_graph
 from skudio.core.hashing import ir_hash
 from skudio.core.ir.graph import Graph
-from skudio.data.reader import load_csv
+from skudio.data.reader import dataset_hash, load_csv
 from skudio.execution.result import TrainingResult
 from skudio.experiments.persist import new_run_id, save_run
 from skudio.experiments.project import Project
@@ -64,6 +64,7 @@ def train_supervised(
             status="success",
             metrics=accuracy,
             ir_hash=ir_hash(graph),
+            dataset_hash=dataset_hash(dataset_path),
             duration_seconds=time.perf_counter() - started,
         )
 
