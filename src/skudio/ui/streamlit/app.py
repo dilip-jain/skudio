@@ -19,6 +19,7 @@ from skudio.core.hashing import ir_hash
 from skudio.core.ir.graph import Graph
 from skudio.core.codegen import emit_module
 from skudio.data.reader import load_csv
+from skudio.data.inspect import inspect_dataframe
 from skudio.execution.predict import PredictionError, batch_predict
 from skudio.execution.runner import run_training
 from skudio.execution.result import TrainingResult
@@ -118,7 +119,18 @@ def _dataset_section() -> Any:
         return None
 
     df = _load_uploaded(upload)
+    with st.expander("Inspect", expanded=False):
+        info = inspect_dataframe(df)
+        st.write(f"**{info.n_rows}** rows ✖ **{info.n_cols}** columns") # noqa: RUF001
+        st.dataframe(_inspection_rows(info), width="stretch")
+        st.dataframe(df.head(10), width="stretch")
     return df
+
+
+def _inspection_rows(info: Any) -> list[dict[str, Any]]:
+    # `sample` is a list of mixed-type values - flatten to a string to serialize to st.dataframe.
+    return [{**c.model_dump(exclude={"sample"}), "sample": ", ".join(str(v) for v in c.sample)}
+        for c in info.columns]
 
 
 def _load_uploaded(upload: Any) -> Any:
