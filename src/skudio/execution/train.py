@@ -6,15 +6,25 @@ import time
 from typing import Any
 from pathlib import Path
 
+import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, r2_score
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
+)
 
 from skudio.components import Task
 from skudio.core.compiler import compile_graph
 from skudio.core.hashing import ir_hash
 from skudio.core.ir.graph import Graph
 from skudio.data.reader import dataset_hash, load_csv
-from skudio.execution.result import TrainingResult
+from skudio.execution.result import Metrics, TrainingResult
 from skudio.experiments.persist import new_run_id, save_run
 from skudio.experiments.project import Project
 
@@ -94,3 +104,23 @@ def _persist(
     stamped = result.model_copy(update={"run_id": rid})
     save_run(project, graph=graph, result=stamped, fitted_model=fitted_model, run_id=rid)
     return stamped
+
+
+def _classification_metrics(y_true: Any, y_pred: Any) -> tuple[Metrics, list[list[int]]]:
+    # `zero_division=0` is accepted at runtime; the stubs are stricter than sklearn.
+    metrics = Metrics(
+        accuracy=float(accuracy_score(y_true, y_pred)),
+        f1=float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
+        precision=float(precision_score(y_true, y_pred, average="weighted", zero_division=0)),
+        recall=float(recall_score(y_true, y_pred, average="weighted", zero_division=0)),
+    )
+
+    return metrics, confusion_matrix(y_true, y_pred).tolist()
+
+
+def _regression_metrics(y_true: Any, y_pred: Any) -> Metrics:
+    return Metrics(
+        r2=float(r2_score(y_true, y_pred)),
+        mae=float(mean_absolute_error(y_true, y_pred)),
+        rmse=float(np.sqrt(mean_squared_error(y_true, y_pred))),
+    )
