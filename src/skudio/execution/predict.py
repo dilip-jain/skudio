@@ -87,4 +87,3 @@ def _maybe_add_probas(out: pd.DataFrame, model: Any, aligned: pd.DataFrame) -> N
 
     for i, cls in enumerate(classes):
         out[f"proba_{cls}"] = proba[:, i]
-

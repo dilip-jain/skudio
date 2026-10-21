@@ -66,13 +66,14 @@ def train_supervised(
         y_pred = model.predict(X_test)
 
         if task == "classification":
-            accuracy = float(accuracy_score(y_test, y_pred))
+            metrics, cm = _classification_metrics(y_test, y_pred)
         else:
-            accuracy = float(r2_score(y_test, y_pred))
+            metrics, cm = _regression_metrics(y_test, y_pred), None
 
         result = TrainingResult(
             status="success",
-            metrics=accuracy,
+            metrics=metrics,
+            confusion_matrix=cm,
             ir_hash=ir_hash(graph),
             dataset_hash=dataset_hash(dataset_path),
             duration_seconds=time.perf_counter() - started,

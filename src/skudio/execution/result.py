@@ -31,7 +31,8 @@ class TrainingResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Status
-    metrics: float | None = None
+    metrics: Metrics = Metrics()
+    confusion_matrix: list[list[int]] | None = None
     error: str | None = None
     ir_hash: str = ""
     dataset_hash: str = ""

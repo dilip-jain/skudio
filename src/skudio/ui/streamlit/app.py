@@ -565,8 +565,10 @@ def _run_history_sidebar() -> None:
 
 def _headline_metric(result: Any) -> str:
     m = result.metrics
-    if m is not None:
-        return f"accuracy = {m:.3f}"
+    if m.accuracy is not None:
+        return f"accuracy = {m.accuracy:.3f}"
+    if m.r2 is not None:
+        return f"R^2 = {m.r2:.3f}"
     if result.status == "failed":
         return "failed"
     return ""
@@ -603,11 +605,27 @@ def _compare_runs_section(project_dir: Path) -> None:
         rows.append({
             "run_id": rid,
             "estimator": _estimator_short_name(graph),
-            "accuracy": m,
+            "accuracy": m.accuracy,
+            "f1": m.f1,
+            "r2": m.r2,
+            "mae": m.mae,
+            "rmse": m.rmse,
             "duration_s": round(result.duration_seconds, 2),
         })
 
-    st.dataframe(rows, width="stretch", hide_index=True)
+    # Drop metric columns that are entirely None (task-appropriate).
+    keep = [
+        k for k in ("accuracy", "f1", "r2", "mae", "rmse") if any(r[k] is not None for r in rows)
+    ]
+
+    displayed = [{
+        "run_id": r["run_id"],
+        "estimator": r["estimator"],
+        **{k: r[k] for k in keep},
+        "duration_s": r["duration_s"],
+    } for r in rows]
+
+    st.dataframe(displayed, width="stretch", hide_index=True)
 
 
 def _project_dir() -> Path:
@@ -623,11 +641,17 @@ def _show_metrics(result: Any, task: str) -> None:
     st.subheader("Metrics")
     m = result.metrics
 
-    cols = st.columns(1)
+    cols = st.columns(4)
     if task == "classification":
-        cols[0].metric("accuracy", f"{m:.3f}" if m is not None else "-")
+        cols[0].metric("accuracy", f"{m.accuracy:.3f}" if m.accuracy is not None else "-")
+        cols[1].metric("f1 (weighted)", f"{m.f1:.3f}" if m.f1 is not None else "-")
+        cols[2].metric("precision", f"{m.precision:.3f}" if m.precision is not None else "-")
+        cols[3].metric("recall", f"{m.recall:.3f}" if m.recall is not None else "-")
     else:
-        cols[0].metric("R^2", f"{m:.3f}" if m is not None else "-")
+        cols[0].metric("R^2", f"{m.r2:.3f}" if m.r2 is not None else "-")
+        cols[1].metric("MAE", f"{m.mae:.4g}" if m.mae is not None else "-")
+        cols[2].metric("RMSE", f"{m.rmse:.4g}" if m.rmse is not None else "-")
+        cols[3].metric("time (s)", f"{result.duration_seconds:.2f}")
 
 
 def _show_downloads(graph: Any, result: Any | None = None, project_dir: Path | None = None) -> None:
