@@ -58,8 +58,9 @@ def train_supervised(
 
         model = compile_graph(graph)
 
+        stratify = y if task == "classification" and _is_stratifiable(y) else None
         X_train, X_test, y_train, y_test = train_test_split(  # noqa: N806  # pylint: disable=invalid-name
-            X, y, random_state=effective_rs)
+            X, y, random_state=effective_rs, stratify=stratify,)
 
         model.fit(X_train, y_train)
         fitted_model = model
@@ -125,3 +126,11 @@ def _regression_metrics(y_true: Any, y_pred: Any) -> Metrics:
         mae=float(mean_absolute_error(y_true, y_pred)),
         rmse=float(np.sqrt(mean_squared_error(y_true, y_pred))),
     )
+
+
+def _is_stratifiable(y: Any) -> bool:
+    try:
+        counts = y.value_counts()
+        return bool((counts >= 2).all() and len(counts) > 1)
+    except AttributeError:
+        return False
