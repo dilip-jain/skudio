@@ -134,3 +134,39 @@ def _is_stratifiable(y: Any) -> bool:
         return bool((counts >= 2).all() and len(counts) > 1)
     except AttributeError:
         return False
+
+
+def _build_extras(task: str, model: Any, x_test: Any, y_test: Any, y_pred: Any) -> dict[str, Any]:
+    # Persist test-set predictions for UI
+    extras: dict[str, Any] = {
+        "task": task,
+        "y_test": [_to_native(v) for v in y_test.tolist()],
+        "y_pred": [_to_native(v) for v in list(y_pred)],
+
+        # `x_test` as a records dict lets permutation importance and other
+        # ad-hoc inspections rehydrate without re-splitting the dataset.
+        "x_test_records": x_test.to_dict(orient="records"),
+        "x_test_columns": [str(c) for c in x_test.columns],
+    }
+
+    if task == "classification" and hasattr(model, "predict_proba"):
+        try:
+            proba = model.predict_proba(x_test)
+            extras["y_proba"] = [[float(v) for v in row] for row in proba]
+
+            classes = getattr(model, "classes_", None)
+            if classes is not None:
+                extras["classes"] = [_to_native(c) for c in list(classes)]
+        finally:
+            proba = None
+    return extras
+
+
+def _to_native(v: Any) -> Any:
+    # Convert numpy scalars to plain Python so the extras dict is JSON-friendly.
+    if hasattr(v, "item"):
+        try:
+            return v.item()
+        except (ValueError, AttributeError):
+            pass
+    return v
