@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -39,3 +39,4 @@ class TrainingResult(BaseModel):
     duration_seconds: float = 0.0
     logs: list[str] = []
     run_id: str | None = None
+    extras: dict[str, Any] = {}

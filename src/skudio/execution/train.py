@@ -71,6 +71,7 @@ def train_supervised(
         else:
             metrics, cm = _regression_metrics(y_test, y_pred), None
 
+        extras = _build_extras(task, model, X_test, y_test, y_pred)
         result = TrainingResult(
             status="success",
             metrics=metrics,
@@ -78,6 +79,7 @@ def train_supervised(
             ir_hash=ir_hash(graph),
             dataset_hash=dataset_hash(dataset_path),
             duration_seconds=time.perf_counter() - started,
+            extras=extras,
         )
 
     except Exception as exc:  # pylint: disable=broad-except
