@@ -7,7 +7,7 @@ from typing import Any
 from pathlib import Path
 
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
@@ -34,6 +34,7 @@ def train_supervised(
     dataset_path: str,
     target: str,
     task: Task = "classification",
+    cv: int | None = None,
     random_state: int = 0,
     save_to_project_dir: str | None = None,
 ) -> TrainingResult:
@@ -58,6 +59,12 @@ def train_supervised(
 
         model = compile_graph(graph)
 
+        cv_scores: list[float] | None = None
+        if cv and cv > 1:
+            scoring = None if task == "classification" else "r2"
+            scores = cross_val_score(model, X, y, cv=cv, scoring=scoring)
+            cv_scores = [float(s) for s in scores]
+
         stratify = y if task == "classification" and _is_stratifiable(y) else None
         X_train, X_test, y_train, y_test = train_test_split(  # noqa: N806  # pylint: disable=invalid-name
             X, y, random_state=effective_rs, stratify=stratify,)
@@ -77,6 +84,7 @@ def train_supervised(
             metrics=metrics,
             confusion_matrix=cm,
             feature_importance=_maybe_feature_importance(model),
+            cv_scores=cv_scores,
             ir_hash=ir_hash(graph),
             dataset_hash=dataset_hash(dataset_path),
             duration_seconds=time.perf_counter() - started,

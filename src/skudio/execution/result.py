@@ -34,10 +34,13 @@ class TrainingResult(BaseModel):
     metrics: Metrics = Metrics()
     confusion_matrix: list[list[int]] | None = None
     feature_importance: dict[str, float] | None = None
+    cv_scores: list[float] | None = None
     error: str | None = None
     ir_hash: str = ""
     dataset_hash: str = ""
     duration_seconds: float = 0.0
     logs: list[str] = []
+    predictions_path: str | None = None
+    probabilities_path: str | None = None
     run_id: str | None = None
     extras: dict[str, Any] = {}

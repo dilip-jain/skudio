@@ -17,6 +17,7 @@ def run_training(
     dataset_path: str,
     target: str,
     task: Task = "classification",
+    cv: int | None = None,
     random_state: int = 0,
     timeout_seconds: float | None = None,
     save_to_project_dir: str | None = None,
@@ -31,7 +32,7 @@ def run_training(
     payload = canonical_json(graph)
     child = ctx.Process(
         target=_child_main,
-        args=(queue, payload, dataset_path, target, task, random_state, save_to_project_dir),
+        args=(queue, payload, dataset_path, target, task, cv, random_state, save_to_project_dir),
         daemon=False,
     )
 
@@ -63,6 +64,7 @@ def _child_main(
     dataset_path: str,
     target: str,
     task: Task,
+    cv: int | None,
     random_state: int,
     save_to_project_dir: str | None,
 ) -> None:
@@ -77,6 +79,7 @@ def _child_main(
             dataset_path=dataset_path,
             target=target,
             task=task,
+            cv=cv,
             random_state=random_state,
             save_to_project_dir=save_to_project_dir,
         )
