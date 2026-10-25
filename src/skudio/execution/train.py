@@ -76,6 +76,7 @@ def train_supervised(
             status="success",
             metrics=metrics,
             confusion_matrix=cm,
+            feature_importance=_maybe_feature_importance(model),
             ir_hash=ir_hash(graph),
             dataset_hash=dataset_hash(dataset_path),
             duration_seconds=time.perf_counter() - started,
@@ -172,3 +173,41 @@ def _to_native(v: Any) -> Any:
         except (ValueError, AttributeError):
             pass
     return v
+
+
+def _maybe_feature_importance(model: Any) -> dict[str, float] | None:
+    est = _final_estimator(model)
+    if est is None:
+        return None
+
+    importances = getattr(est, "feature_importances_", None)
+    if importances is None:
+        return None
+
+    names = _feature_names(model)
+    if names is None or len(names) != len(importances):
+        names = [f"f{i}" for i in range(len(importances))]
+
+    return {str(n): float(v) for n, v in zip(names, importances, strict=False)}
+
+
+def _final_estimator(model: Any) -> Any:
+    inner = getattr(model, "best_estimator_", None) or model
+    steps = getattr(inner, "steps", None)
+    if steps:
+        return steps[-1][1]
+    return inner
+
+
+def _feature_names(model: Any) -> list[str] | None:
+    for candidate in (model, getattr(model, "best_estimator_", None)):
+        if candidate is None:
+            continue
+        names_fn = getattr(candidate, "get_feature_names_out", None)
+        if names_fn is None:
+            continue
+        try:
+            return [str(n) for n in names_fn()]
+        except Exception:  # pylint: disable=broad-except
+            return None
+    return None

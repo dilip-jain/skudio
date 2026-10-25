@@ -33,6 +33,7 @@ class TrainingResult(BaseModel):
     status: Status
     metrics: Metrics = Metrics()
     confusion_matrix: list[list[int]] | None = None
+    feature_importance: dict[str, float] | None = None
     error: str | None = None
     ir_hash: str = ""
     dataset_hash: str = ""
