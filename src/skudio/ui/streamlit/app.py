@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -457,7 +458,8 @@ def _train_and_report(
         graph = Graph.model_validate_json(cached["graph_json"])
 
     project_dir = _project_dir()
-    result = _get_or_train(graph, df, target, task, project_dir)
+    cv_folds = _cv_controls()
+    result = _get_or_train(graph, df, target, task, project_dir, cv_folds)
     if result is None:
         _show_downloads(graph)
         return
@@ -471,14 +473,37 @@ def _train_and_report(
         st.caption(f"Saved as run `{result.run_id}` under `{project_dir}`")
 
     _show_metrics(result, task)
+    _show_cv_scores(result)
     _show_downloads(graph, result, project_dir)
     _predict_section(result, project_dir, df, target)
     _compare_runs_section(project_dir)
 
 
-def _get_or_train(graph: Any, df: Any, target: str, task: str, project_dir: Path) -> Any:
+def _cv_controls() -> int | None:
+    with st.expander("Cross-validation", expanded=False):
+        enabled = st.checkbox("Cross-validate", value=False, key="cv_enabled")
+        if not enabled:
+            return None
+        folds = st.slider("Folds", min_value=2, max_value=10, value=5, key="cv_folds")
+        return int(folds)
+
+
+def _show_cv_scores(result: Any) -> None:
+    scores = getattr(result, "cv_scores", None)
+    if not scores:
+        return
+
+    st.subheader("Cross-validation")
+    arr = np.asarray(scores, dtype=float)
+    st.caption(f"mean {arr.mean():.3f} ± {arr.std():.3f} across {len(arr)} folds")
+    st.bar_chart({"score": arr.tolist()})
+
+
+def _get_or_train(
+    graph: Any, df: Any, target: str, task: str, project_dir: Path, cv: int | None
+) -> Any:
     # Streamlit reruns the whole script on every widget interaction, thus cache run.
-    cache_key = (ir_hash(graph), target, task)
+    cache_key = (ir_hash(graph), target, task, cv)
     cached = st.session_state.get(_TRAINED_KEY)
     if cached:
         cached_key = cached["key"]
@@ -514,6 +539,7 @@ def _get_or_train(graph: Any, df: Any, target: str, task: str, project_dir: Path
             dataset_path=str(csv_path),
             target=target,
             task=task, # type: ignore[arg-type]
+            cv=cv,
             save_to_project_dir=str(project_dir),
         )
 
@@ -652,6 +678,13 @@ def _show_metrics(result: Any, task: str) -> None:
         cols[1].metric("MAE", f"{m.mae:.4g}" if m.mae is not None else "-")
         cols[2].metric("RMSE", f"{m.rmse:.4g}" if m.rmse is not None else "-")
         cols[3].metric("time (s)", f"{result.duration_seconds:.2f}")
+
+    if result.feature_importance:
+        st.subheader("Feature importance")
+        st.dataframe(
+            sorted(result.feature_importance.items(), key=lambda kv: -kv[1])[:20],
+            width="stretch",
+        )
 
 
 def _show_downloads(graph: Any, result: Any | None = None, project_dir: Path | None = None) -> None:
@@ -835,3 +868,4 @@ def _spill_to_temp(df: Any) -> Path:
 # streamlit run app.py
 if __name__ == "__main__":
     main()
+
