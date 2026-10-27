@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
+from queue import Empty
 import multiprocessing as mp
+from multiprocessing.process import BaseProcess
 
 from skudio.components import Task
 from skudio.core.ir.canonical import canonical_json
 from skudio.core.ir.graph import Graph
 from skudio.execution.result import TrainingResult
+
+_POLL_SECONDS = 0.1
+_JOIN_GRACE_SECONDS = 5
 
 
 def run_training(
@@ -38,28 +44,50 @@ def run_training(
 
     child.start()
     try:
-        child.join(timeout=timeout_seconds)
-        if child.is_alive():
-            child.terminate()
-            child.join(timeout=5)
-            return TrainingResult(status="failed", error="training exceeded timeout")
+        payload = _drain_queue(queue, child, timeout_seconds)
+        if payload is None:
+            if child.is_alive():
+                child.terminate()
+                child.join(timeout=5)
+                return TrainingResult(status="failed", error="training exceeded timeout")
 
-        if queue.empty():
+            child.join(timeout=_JOIN_GRACE_SECONDS)
             return TrainingResult(
                 status="failed",
                 error=f"child exited with code {child.exitcode} and no result",
             )
 
-        payload = queue.get_nowait()
+        child.join(timeout=_JOIN_GRACE_SECONDS)
         return TrainingResult.model_validate_json(payload)
 
     finally:
         if child.is_alive():
             child.terminate()
+            child.join(timeout=_JOIN_GRACE_SECONDS)
+
+
+def _drain_queue(
+    queue: mp.Queue[Any],  # pylint: disable=unsubscriptable-object
+    child: BaseProcess,
+    timeout_seconds: float | None
+) -> Any:
+    """Reading before/while the child is alive avoids mp.Queue deadlock."""
+    deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
+    while True:
+        try:
+            return queue.get(timeout=_POLL_SECONDS)
+        except Empty:
+            pass
+
+        if not child.is_alive():
+            return None
+
+        if deadline is not None and time.monotonic() >= deadline:
+            return None
 
 
 def _child_main(
-    queue: mp.Queue[Any],  # pylint: disable=unsubscriptable-object  # mp.Queue is generic at type-check time
+    queue: mp.Queue[Any],  # pylint: disable=unsubscriptable-object
     ir_json: str,
     dataset_path: str,
     target: str,
@@ -87,3 +115,4 @@ def _child_main(
     except Exception as exc:  # pylint: disable=broad-except
         result = TrainingResult(status="failed", error=f"{type(exc).__name__}: {exc}")
     queue.put(result.model_dump_json())
+
