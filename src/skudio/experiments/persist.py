@@ -59,4 +59,3 @@ def list_runs(project: Project) -> list[str]:
     if not project.experiments_dir.exists():
         return []
     return sorted(p.name for p in project.experiments_dir.iterdir() if p.is_dir())
-

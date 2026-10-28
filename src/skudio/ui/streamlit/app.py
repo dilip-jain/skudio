@@ -868,4 +868,3 @@ def _spill_to_temp(df: Any) -> Path:
 # streamlit run app.py
 if __name__ == "__main__":
     main()
-

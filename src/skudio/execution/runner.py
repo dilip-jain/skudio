@@ -115,4 +115,3 @@ def _child_main(
     except Exception as exc:  # pylint: disable=broad-except
         result = TrainingResult(status="failed", error=f"{type(exc).__name__}: {exc}")
     queue.put(result.model_dump_json())
-
