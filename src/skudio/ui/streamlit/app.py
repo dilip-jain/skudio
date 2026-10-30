@@ -28,6 +28,10 @@ from skudio.experiments.project import Project
 from skudio.experiments.persist import list_runs, load_run
 from skudio.server.token import verify_token
 from skudio.ui.streamlit.graph_builder import build_graph
+from skudio.visualization import (
+    class_balance,
+    histogram,
+)
 
 _TOKEN_ENV = "SKUDIO_TOKEN"
 _PROJECT_ENV = "SKUDIO_PROJECT"
@@ -50,6 +54,8 @@ def main() -> None:
     df = _dataset_section()
     if df is None:
         return
+
+    _explore_section(df)
 
     target, features = _target_and_features(df)
     if target is None or not features:
@@ -148,6 +154,23 @@ def _load_uploaded(upload: Any) -> Any:
 
 # ---------------------------------------------------------------------------
 # Explore (EDA)
+
+
+def _explore_section(df: Any) -> None:
+    tabs = ["Columns", "Target"]
+    with st.expander("1b. Explore", expanded=False):
+        cols = [str(c) for c in df.columns]
+
+        cols_tab, target_tab = st.tabs(tabs)
+        with cols_tab:
+            column = st.selectbox("Column", options=cols, key="eda_column")
+            if column:
+                st.pyplot(histogram(df, column))
+
+        with target_tab:
+            target = st.selectbox("Target column", options=["", *cols], index=0, key="eda_target")
+            if target:
+                st.pyplot(class_balance(df, target))
 
 
 def _target_and_features(df: Any) -> tuple[str | None, list[str]]:
