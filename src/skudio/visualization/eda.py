@@ -53,6 +53,41 @@ def class_balance(df: pd.DataFrame, target: str) -> Figure:
     return fig
 
 
+def missing_bar(df: pd.DataFrame) -> Figure:
+    """Return a bar chart of null counts per column, descending."""
+    fig = Figure(figsize=(6, 3.5))
+    ax = cast(Axes, fig.subplots())
+    missing = df.isna().sum().sort_values(ascending=False)
+    ax.bar(missing.index.astype(str).tolist(), missing.to_numpy())
+    ax.set_ylabel("missing")
+    ax.set_title("Missing values per column")
+    ax.tick_params(axis="x", rotation=30)
+    fig.tight_layout()
+    return fig
+
+
+def correlation_heatmap(df: pd.DataFrame) -> Figure:
+    """Return a heatmap of pairwise Pearson correlations of numeric columns.
+    Non-numeric columns are silently dropped. If fewer than two numeric
+    columns remain the returned Figure has an empty axes.
+    """
+    fig = Figure(figsize=(6, 5))
+    ax = cast(Axes, fig.subplots())
+    numeric = df.select_dtypes(include="number")
+    corr = numeric.corr(numeric_only=True)
+    labels = list(corr.columns.astype(str))
+
+    im = ax.imshow(corr.to_numpy(), vmin=-1.0, vmax=1.0, cmap="RdBu_r", aspect="auto")
+    ax.set_xticks(range(len(labels)))
+    ax.set_yticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_yticklabels(labels)
+    ax.set_title("Correlation matrix (numeric columns)")
+    fig.colorbar(im, ax=ax, shrink=0.85)
+    fig.tight_layout()
+    return fig
+
+
 def _require_column(df: pd.DataFrame, column: str) -> None:
     if column not in df.columns:
         raise ValueError(f"column {column!r} not in dataframe")
