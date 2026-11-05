@@ -30,7 +30,16 @@ from skudio.server.token import verify_token
 from skudio.ui.streamlit.graph_builder import build_graph
 from skudio.visualization import (
     class_balance,
+    correlation_heatmap,
+    high_correlation_pairs,
     histogram,
+    missing_bar,
+    target_vs_feature,
+    confusion_matrix_figure,
+    pr_curves_figure,
+    prediction_vs_actual_figure,
+    residuals_figure,
+    roc_curves_figure,
 )
 
 _TOKEN_ENV = "SKUDIO_TOKEN"
@@ -157,11 +166,11 @@ def _load_uploaded(upload: Any) -> Any:
 
 
 def _explore_section(df: Any) -> None:
-    tabs = ["Columns", "Target"]
+    tabs = ["Columns", "Target", "Target vs feature", "Missing", "Correlations"]
     with st.expander("1b. Explore", expanded=False):
         cols = [str(c) for c in df.columns]
 
-        cols_tab, target_tab = st.tabs(tabs)
+        cols_tab, target_tab, tvf_tab, missing_tab, corr_tab = st.tabs(tabs)
         with cols_tab:
             column = st.selectbox("Column", options=cols, key="eda_column")
             if column:
@@ -171,6 +180,30 @@ def _explore_section(df: Any) -> None:
             target = st.selectbox("Target column", options=["", *cols], index=0, key="eda_target")
             if target:
                 st.pyplot(class_balance(df, target))
+
+        with tvf_tab:
+            col_a, col_b = st.columns(2)
+            tvf_target = col_a.selectbox("Target", options=["", *cols], index=0, key="tvf_target")
+            tvf_feature = col_b.selectbox("Feature", options=["", *cols], key="tvf_feature")
+
+            if tvf_target and tvf_feature and tvf_target != tvf_feature:
+                st.pyplot(target_vs_feature(df, tvf_target, tvf_feature))
+            elif tvf_target and tvf_feature:
+                st.caption("Target and feature must differ.")
+
+        with missing_tab:
+            st.pyplot(missing_bar(df))
+
+        with corr_tab:
+            st.pyplot(correlation_heatmap(df))
+            pairs = high_correlation_pairs(df, threshold=0.9)
+            if pairs:
+                st.subheader("Highly correlated numeric pairs (|r| ≥ 0.9)")
+                st.dataframe(
+                    [{"a": a, "b": b, "correlation": round(r, 3)} for a, b, r in pairs],
+                    width="stretch",
+                    hide_index=True,
+                )
 
 
 def _target_and_features(df: Any) -> tuple[str | None, list[str]]:
@@ -709,6 +742,29 @@ def _show_metrics(result: Any, task: str) -> None:
             width="stretch",
         )
 
+    _show_result_plots(result, task)
+
+
+def _show_result_plots(result: Any, task: str) -> None:
+    extras = getattr(result, "extras", None) or {}
+    y_test = extras.get("y_test")
+    y_pred = extras.get("y_pred")
+    if not y_test or not y_pred:
+        return
+
+    st.subheader("Result plots")
+    if task == "classification":
+        col1, col2 = st.columns(2)
+        col1.pyplot(confusion_matrix_figure(y_test, y_pred))
+        y_score = extras.get("y_proba")
+        classes = extras.get("classes")
+        if y_score:
+            col2.pyplot(roc_curves_figure(y_test, y_score, classes))
+            st.pyplot(pr_curves_figure(y_test, y_score, classes))
+    else:
+        col1, col2 = st.columns(2)
+        col1.pyplot(prediction_vs_actual_figure(y_test, y_pred))
+        col2.pyplot(residuals_figure(y_test, y_pred))
 
 def _show_downloads(graph: Any, result: Any | None = None, project_dir: Path | None = None) -> None:
     st.subheader("Show Python & downloads")
