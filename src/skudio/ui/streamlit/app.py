@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -35,6 +36,7 @@ from skudio.visualization import (
     histogram,
     missing_bar,
     target_vs_feature,
+    permutation_importance_figure,
     confusion_matrix_figure,
     pr_curves_figure,
     prediction_vs_actual_figure,
@@ -765,6 +767,34 @@ def _show_result_plots(result: Any, task: str) -> None:
         col1, col2 = st.columns(2)
         col1.pyplot(prediction_vs_actual_figure(y_test, y_pred))
         col2.pyplot(residuals_figure(y_test, y_pred))
+    _permutation_importance_section(result)
+
+
+def _permutation_importance_section(result: Any) -> None:
+    extras = getattr(result, "extras", None) or {}
+    records = extras.get("x_test_records")
+    if not records or not result.run_id:
+        return
+
+    with st.expander("Permutation importance", expanded=False):
+        st.caption("Slower than a model's native feature_importances_ but works for any estimator."
+            "Uses 5 permutations on the held-out test split.")
+
+        if not st.button("Compute", key="perm_run"):
+            return
+
+        project_dir = _project_dir()
+        joblib_path = project_dir / "experiments" / result.run_id / "pipeline.joblib"
+        if not joblib_path.exists():
+            st.error("Fitted model not found on disk.")
+            return
+
+        with st.spinner("Computing permutation importance..."):
+            model = joblib.load(joblib_path)
+            x_test = pd.DataFrame(records, columns=extras.get("x_test_columns"))
+            y_test = extras.get("y_test")
+            st.pyplot(permutation_importance_figure(model, x_test, y_test))
+
 
 def _show_downloads(graph: Any, result: Any | None = None, project_dir: Path | None = None) -> None:
     st.subheader("Show Python & downloads")
