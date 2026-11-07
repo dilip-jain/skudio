@@ -42,3 +42,7 @@ class CodegenError(SkudioError):
 
 class RegistryError(SkudioError):
     """Unknown or duplicate component registration."""
+
+
+class ValidationError(SkudioError):
+    """The validator produced an error-severity issue."""

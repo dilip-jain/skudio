@@ -27,6 +27,14 @@ class Graph(BaseModel):
     metadata: dict[str, Any] = {}
 
 
+    def get_adjacency_list(self) -> dict[str, set[str]]:
+        """Build adjacency list for the graph."""
+        adj: dict[str, set[str]] = {n.id: set() for n in self.nodes}
+        for edge in self.edges:
+            if edge.src.node_id in adj and edge.dst.node_id in adj:
+                adj[edge.src.node_id].add(edge.dst.node_id)
+        return adj
+
 # Node reference Graph via forward ref
 Node.model_rebuild()
 Graph.model_rebuild()
