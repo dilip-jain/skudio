@@ -101,4 +101,3 @@ def _resolve_project_dir(project_dir: Path | None) -> Path:
     root = (project_dir or _PROJECT_DEFAULT).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     return root
-
