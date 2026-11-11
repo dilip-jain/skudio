@@ -17,7 +17,7 @@ def _walk(graph: Graph, *, in_search_scope: bool, path: str) -> list[ValidationI
 
     for node in graph.nodes:
         scope = in_search_scope or node.kind == "search"
-        
+
         for name, pv in node.params.items():
             if isinstance(pv, SearchSpace) and not scope:
                 issues.append(ValidationIssue(

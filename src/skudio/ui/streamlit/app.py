@@ -20,6 +20,7 @@ from skudio.components.registry import default_registry
 from skudio.core.hashing import ir_hash
 from skudio.core.ir.graph import Graph
 from skudio.core.codegen import emit_module
+from skudio.core.validator import validate
 from skudio.data.reader import load_csv
 from skudio.data.inspect import inspect_dataframe
 from skudio.execution.predict import PredictionError, batch_predict
@@ -514,6 +515,13 @@ def _train_and_report(
         and cached.get("graph_json")
     ):
         graph = Graph.model_validate_json(cached["graph_json"])
+
+    report = validate(graph)
+    if not report.ok:
+        st.error("IR validation failed:")
+        for issue in report.errors():
+            st.write(f"- `{issue.path}` - {issue.message}")
+        return
 
     project_dir = _project_dir()
     cv_folds = _cv_controls()
