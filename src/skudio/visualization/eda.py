@@ -134,7 +134,8 @@ def target_vs_feature(df: pd.DataFrame, target: str, feature: str) -> Figure:
     elif t_num and not f_num:
         groups = [df[df[feature] == g][target].dropna() for g in df[feature].dropna().unique()]
         labels = [str(g) for g in df[feature].dropna().unique()]
-        ax.boxplot(groups, label=labels)
+        ax.boxplot(groups)
+        ax.set_xticks(range(1, len(labels) + 1), labels)
         ax.set_xlabel(feature)
         ax.set_ylabel(target)
         ax.set_title(f"{target} distribution by {feature}")
@@ -143,7 +144,8 @@ def target_vs_feature(df: pd.DataFrame, target: str, feature: str) -> Figure:
     elif not t_num and f_num:
         groups = [df[df[target] == c][feature].dropna() for c in df[target].dropna().unique()]
         labels = [str(c) for c in df[target].dropna().unique()]
-        ax.boxplot(groups, label=labels)
+        ax.boxplot(groups)
+        ax.set_xticks(range(1, len(labels) + 1), labels)
         ax.set_xlabel(target)
         ax.set_ylabel(feature)
         ax.set_title(f"{feature} distribution by {target}")
