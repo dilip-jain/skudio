@@ -6,4 +6,10 @@ Not AutoML. Not a proprietary low-code abstraction. The generated code is idioma
 
 ## Status
 
-Pre-alpha. Version `0.1.0`.
+Pre-alpha. Version `0.2.0`.
+
+## Project plan
+
+- [Product and release roadmap](docs/ROADMAP.md)
+- [Agent-ready implementation plan](docs/IMPLEMENTATION_PLAN.md)
+- [Product and architecture decisions](docs/PRODUCT_ARCHITECTURE.md)
